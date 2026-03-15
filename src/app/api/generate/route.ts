@@ -1,50 +1,82 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 
 const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY
 
-const PLATFORM_PROMPTS: Record<string, string> = {
-  rednote: `你是一位小红书爆款文案专家。请根据图片内容，生成一篇吸引人的种草文案。
-要求：
-1. 标题要吸引眼球，可用emoji
-2. 正文要有"姐妹们"等亲切称呼
-3. 突出产品卖点和性价比
-4. 适当使用emoji增加趣味性
-5. 结尾引导互动（点赞收藏评论）
-请直接输出文案，不要添加任何标题或格式标记。`,
+// 完整的专业提示词（与原项目一致）
+const COPYWRITER_PROMPT = (platform: string, tone: string, isProAudio: boolean = false) => {
+  const proInstruction = isProAudio
+    ? `\n【⚠️专业音响模式开启】：
+       - 角色切换为：资深声学工程师/演艺现场专家。
+       - 关键词必须硬核：使用SPL、频响曲线、D类功放、Dante协议、心型指向等术语。
+       - 拒绝肤浅的形容词，用数据和工程参数说话。`
+    : ''
 
-  taobao: `你是一位淘宝/天猫金牌文案策划。请根据图片内容，生成商品详情页文案。
-要求：
-1. 突出产品核心卖点
-2. 使用场景化描述
-3. 强调品质和性价比
-4. 适合电商平台展示
-请直接输出文案，不要添加任何标题或格式标记。`,
+  let platformStyle = ''
 
-  amazon: `You are an Amazon product listing expert. Based on the image, create a compelling product description.
-Requirements:
-1. Highlight key features and benefits
-2. Use bullet points for easy reading
-3. Include relevant keywords for SEO
-4. Professional tone
-Please output the content directly without any titles or formatting markers.`,
+  switch (platform) {
+    case 'rednote':
+      platformStyle = `
+        【角色】：你是一位拥有百万粉丝的**资深小红书内容运营**。
+        【能力】：擅长挖掘痛点，通过"情绪价值"和"真实体验"打造高赞笔记。
+        
+        【爆款公式】：
+        1. **标题 (Hook)**：极具吸引力！拒绝平铺直叙。
+           - 悬念式/反差式/痛点式，必须带Emoji。
+        2. **正文 (Content)**：
+           - **语气**：真诚KOC视角，像闺蜜安利，拒绝AI味。
+           - **排版**：善用Emoji (✨🌱💡)，段落短促，阅读轻松。
+        3. **标签**：文末5个精准流量标签。
+      `
+      break
 
-  tiktok: `你是一位TikTok短视频脚本专家。请根据图片内容，生成短视频脚本。
-要求：
-1. 开头3秒要抓住眼球
-2. 内容要有节奏感
-3. 适合短视频快节奏
-4. 结尾引导关注点赞
-请直接输出脚本内容，不要添加任何标题或格式标记。`,
+    case 'amazon':
+      platformStyle = `
+        【Role】: Top-Tier Amazon SEO Copywriter.
+        【STRICT REQUIREMENT】: **OUTPUT IN ENGLISH ONLY.**
+        
+        【Format】:
+        1. **Title**: [Brand] + [Keywords] + [Features] + [Model] (Max 200 chars).
+        2. **5 Bullet Points**: [CAPS HEADER] - Benefit. Focus on pain points & specs.
+        3. **Description**: 150 words usage scenario.
+        【Tone】: Professional, Trustworthy, Native American English.
+      `
+      break
+
+    case 'taobao':
+      platformStyle = `
+        【角色】：天猫/淘宝金牌运营，一切为了转化。
+        【任务】：详情页首屏营销短文案。
+        【要求】：
+        1. **简单粗暴**：直接讲好处，要功利。
+        2. **标题**：30字内营销短标题。
+        3. **卖点**：3个核心优势（顺丰包邮/终身质保）。
+        4. **紧迫感**：限时/库存告急。
+      `
+      break
+
+    case 'tiktok':
+      platformStyle = `
+        【Role】: Viral TikTok Script Writer.
+        【STRICT REQUIREMENT】: **OUTPUT IN ENGLISH ONLY.**
+        
+        【Structure】:
+        1. **Hook (0-3s)**: Stop scrolling immediately.
+        2. **Problem**: Show the struggle.
+        3. **Solution**: Reveal product as hero.
+        4. **CTA**: Link in bio.
+      `
+      break
+
+    default:
+      platformStyle = `你是一位金牌文案。请基于图片生成适合 ${platform} 平台的推广内容。`
+  }
+
+  return `
+    ${platformStyle}
+    ${proInstruction}
+    【注意】：忽略背景杂物，只关注核心产品。
+  `
 }
-
-const PRO_AUDIO_PROMPT = `\n\n【专业模式增强】
-请特别注意以下专业参数的描述：
-- 声压级(SPL)和覆盖角度
-- 频率响应范围
-- 功放类型(D类/AB类)和功率
-- 单元配置(低音/中音/高音)
-- 适用场景(会议室/演出/户外等)
-使用专业术语但通俗易懂的表达方式。`
 
 async function analyzeImages(images: string[], prompt: string) {
   if (!DASHSCOPE_API_KEY) {
@@ -87,30 +119,36 @@ async function analyzeImages(images: string[], prompt: string) {
   return data.choices[0]?.message?.content || ''
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const body = await request.json()
-    const { platform, tone, isProAudio, images, additionalInfo } = body
+    const body = await req.json()
+    const { platform, tone, images, additionalInfo, isProAudio } = body
 
     if (!images || images.length === 0) {
-      return NextResponse.json({ error: '请上传至少一张图片' }, { status: 400 })
+      return NextResponse.json({ error: '请上传图片' }, { status: 400 })
     }
 
-    let prompt = PLATFORM_PROMPTS[platform] || PLATFORM_PROMPTS.rednote
+    const systemPrompt = COPYWRITER_PROMPT(
+      platform || 'rednote',
+      tone || 'passion',
+      isProAudio || false
+    )
 
-    if (isProAudio) {
-      prompt += PRO_AUDIO_PROMPT
-    }
+    const finalPrompt = `
+      ${systemPrompt}
+      
+      【用户补充信息】：${additionalInfo || '无'}
+      
+      请直接输出最终文案，不要输出思考过程。
+    `
 
-    if (additionalInfo) {
-      prompt += `\n\n【用户补充信息】\n${additionalInfo}`
-    }
+    console.log(`📝 Generating [${platform}] ProMode: ${isProAudio ? 'ON' : 'OFF'}...`)
 
-    const content = await analyzeImages(images, prompt)
+    const result = await analyzeImages(images, finalPrompt)
 
-    return NextResponse.json({ content })
+    return NextResponse.json({ content: result })
   } catch (error: any) {
-    console.error('生成失败:', error)
-    return NextResponse.json({ error: error.message || '生成失败，请稍后重试' }, { status: 500 })
+    console.error('Copywriter error:', error)
+    return NextResponse.json({ error: error.message || '生成失败' }, { status: 500 })
   }
 }
