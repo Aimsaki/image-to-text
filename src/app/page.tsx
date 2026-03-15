@@ -19,8 +19,10 @@ export default function HomePage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedContent, setGeneratedContent] = useState('')
   const [isProAudio, setIsProAudio] = useState(false)
+  const [error, setError] = useState('')
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
+    setError('')
     Promise.all(
       acceptedFiles.map(async (f, i) => {
         const base64 = await new Promise<string>((resolve) => {
@@ -44,10 +46,19 @@ export default function HomePage() {
   })
 
   const handleGenerate = async () => {
-    if (uploadedImages.length === 0) return alert('请上传图片')
+    if (uploadedImages.length === 0) {
+      setError('请上传图片')
+      return
+    }
+    
     setIsGenerating(true)
     setGeneratedContent('')
+    setError('')
+    
     try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 60000)
+      
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -58,12 +69,31 @@ export default function HomePage() {
           images: uploadedImages.map((i) => i.base64),
           additionalInfo,
         }),
+        signal: controller.signal,
       })
+      
+      clearTimeout(timeoutId)
+      
       const data = await res.json()
-      if (data.content) setGeneratedContent(data.content)
-      else if (data.error) alert(data.error)
-    } catch (e) {
-      alert('生成失败，请检查网络')
+      
+      if (!res.ok) {
+        throw new Error(data.error || `服务器错误 (${res.status})`)
+      }
+      
+      if (data.content) {
+        setGeneratedContent(data.content)
+      } else {
+        throw new Error('未获取到生成内容')
+      }
+    } catch (e: any) {
+      console.error('生成错误:', e)
+      if (e.name === 'AbortError') {
+        setError('请求超时，请重试')
+      } else if (e.message) {
+        setError(e.message)
+      } else {
+        setError('生成失败，请检查网络连接')
+      }
     } finally {
       setIsGenerating(false)
     }
@@ -90,7 +120,7 @@ export default function HomePage() {
               {platforms.map((p) => (
                 <div
                   key={p.id}
-                  onClick={() => setPlatform(p.id)}
+                  onClick={() => { setPlatform(p.id); setError('') }}
                   className={`cursor-pointer border rounded-xl p-2.5 sm:p-3 flex items-center gap-2 sm:gap-3 transition-all duration-200 relative overflow-hidden ${
                     platform === p.id ? `${p.bg} ${p.border} ring-2 ${p.activeRing} ring-offset-1` : 'border-slate-100 hover:bg-slate-50 hover:border-slate-300'
                   }`}
@@ -105,7 +135,7 @@ export default function HomePage() {
           </div>
 
           <div
-            onClick={() => setIsProAudio(!isProAudio)}
+            onClick={() => { setIsProAudio(!isProAudio); setError('') }}
             className={`flex items-center justify-between p-3 sm:p-4 rounded-xl border cursor-pointer transition-all select-none ${
               isProAudio ? 'bg-indigo-600 border-indigo-600 shadow-md transform scale-[1.02]' : 'bg-white border-slate-200 hover:border-indigo-300'
             }`}
@@ -139,7 +169,7 @@ export default function HomePage() {
                   <div key={img.id} className="relative group">
                     <img src={img.preview} alt="preview" className="w-full h-14 sm:h-16 object-cover rounded-lg border border-slate-100 shadow-sm" />
                     <button
-                      onClick={(e) => { e.stopPropagation(); setUploadedImages((prev) => prev.filter((i) => i.id !== img.id)) }}
+                      onClick={(e) => { e.stopPropagation(); setUploadedImages((prev) => prev.filter((i) => i.id !== img.id)); setError('') }}
                       className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
                     >×</button>
                   </div>
@@ -152,11 +182,17 @@ export default function HomePage() {
             <label className="mb-2 block text-sm font-medium text-slate-700">补充卖点 (可选)</label>
             <textarea
               value={additionalInfo}
-              onChange={(e) => setAdditionalInfo(e.target.value)}
+              onChange={(e) => { setAdditionalInfo(e.target.value); setError('') }}
               placeholder="例如：德国进口单元，适用于千人场，D类功放..."
               className="w-full h-16 sm:h-20 px-3 py-2 text-sm bg-slate-50 focus:bg-white border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
           </div>
+
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+              ⚠️ {error}
+            </div>
+          )}
 
           <button
             onClick={handleGenerate}
