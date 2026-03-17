@@ -3,13 +3,60 @@
 
 import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, Sparkles, Copy, Instagram, ShoppingBag, Globe, Video, Mic2, RefreshCw } from 'lucide-react'
+import { Upload, Sparkles, Copy, Instagram, ShoppingBag, Globe, Video, Mic2, RefreshCw, Settings } from 'lucide-react'
 
 interface UploadedImage {
   id: string
   preview: string
   base64: string
   file: File
+}
+
+interface PlatformConfig {
+  id: string
+  name: string
+  icon: any
+  color: string
+  bg: string
+  border: string
+  activeRing: string
+}
+
+const DEFAULT_PROMPTS: Record<string, string> = {
+  rednote: `你是一位拥有百万粉丝的**资深小红书内容运营**。
+【能力】：擅长挖掘痛点，通过"情绪价值"和"真实体验"打造高赞笔记。
+
+【爆款公式】：
+1. **标题 (Hook)**：极具吸引力！拒绝平铺直叙。
+   - 悬念式/反差式/痛点式，必须带Emoji。
+2. **正文 (Content)**：
+   - **语气**：真诚KOC视角，像闺蜜安利，拒绝AI味。
+   - **排版**：善用Emoji (✨🌱💡)，段落短促，阅读轻松。
+3. **标签**：文末5个精准流量标签。`,
+
+  taobao: `你是一位天猫/淘宝金牌运营，一切为了转化。
+【任务】：详情页首屏营销短文案。
+【要求】：
+1. **简单粗暴**：直接讲好处，要功利。
+2. **标题**：30字内营销短标题。
+3. **卖点**：3个核心优势（顺丰包邮/终身质保）。
+4. **紧迫感**：限时/库存告急。`,
+
+  amazon: `You are an Amazon product listing expert. Based on the image, create a compelling product description.
+Requirements:
+1. Highlight key features and benefits
+2. Use bullet points for easy reading
+3. Include relevant keywords for SEO
+4. Professional tone
+Please output content directly without any titles or formatting markers.`,
+
+  tiktok: `You are a viral TikTok script writer. Based on the image, create a short, engaging video script.
+Requirements:
+1. **Hook (0-3s)**: Stop scrolling immediately.
+2. **Problem**: Show the struggle.
+3. **Solution**: Reveal product as hero.
+4. **CTA**: Link in bio.
+Please output content directly without any titles or formatting markers.`,
 }
 
 export default function HomePage() {
@@ -21,6 +68,11 @@ export default function HomePage() {
   const [isProAudio, setIsProAudio] = useState(false)
   const [error, setError] = useState('')
   const [retryCount, setRetryCount] = useState(0)
+  const [showSettings, setShowSettings] = useState(false)
+  const [customPrompts, setCustomPrompts] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem('customPrompts')
+    return saved ? JSON.parse(saved) : {}
+  })
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setError('')
@@ -72,6 +124,7 @@ export default function HomePage() {
           isProAudio,
           images: uploadedImages.map((i) => i.base64),
           additionalInfo,
+          customPrompt: customPrompts[platform] || '',
         }),
         signal: controller.signal,
       })
@@ -125,7 +178,20 @@ export default function HomePage() {
     handleGenerate(true)
   }
 
-  const platforms = [
+  const handleSaveCustomPrompt = () => {
+    localStorage.setItem('customPrompts', JSON.stringify(customPrompts))
+    setShowSettings(false)
+    alert('提示词已保存')
+  }
+
+  const handleResetPrompt = (platformId: string) => {
+    setCustomPrompts(prev => ({
+      ...prev,
+      [platformId]: DEFAULT_PROMPTS[platformId] || '',
+    }))
+  }
+
+  const platforms: PlatformConfig[] = [
     { id: 'rednote', name: '小红书', icon: Instagram, color: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-200', activeRing: 'ring-pink-500' },
     { id: 'taobao', name: '淘宝/天猫', icon: ShoppingBag, color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-200', activeRing: 'ring-orange-500' },
     { id: 'amazon', name: '亚马逊', icon: Globe, color: 'text-slate-800', bg: 'bg-slate-100', border: 'border-slate-300', activeRing: 'ring-slate-800' },
@@ -155,6 +221,13 @@ export default function HomePage() {
                     <p.icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </div>
                   <span className={`text-xs sm:text-sm font-bold ${platform === p.id ? 'text-slate-900' : 'text-slate-600'}`}>{p.name}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowSettings(true) }}
+                    className="absolute top-1 right-1 w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center transition-colors"
+                    title="自定义提示词"
+                  >
+                    <Settings className="w-3 h-3 text-slate-500" />
+                  </button>
                 </div>
               ))}
             </div>
@@ -282,6 +355,62 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-slate-800">自定义提示词</h3>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {platforms.map((p) => (
+                <div key={p.id} className="space-y-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${p.bg}`}>
+                      <p.icon className="w-4 h-4 text-white" />
+                    </div>
+                    <span className="font-semibold text-slate-700">{p.name}</span>
+                  </div>
+                  <textarea
+                    value={customPrompts[p.id] || ''}
+                    onChange={(e) => setCustomPrompts(prev => ({ ...prev, [p.id]: e.target.value }))}
+                    placeholder="输入自定义提示词（留空使用系统默认）"
+                    className="w-full h-24 px-3 py-2 text-sm border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    onClick={() => handleResetPrompt(p.id)}
+                    className="text-xs text-slate-500 hover:text-slate-700 underline"
+                  >
+                    恢复默认
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-2 mt-6">
+              <button
+                onClick={handleSaveCustomPrompt}
+                className="flex-1 h-11 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+              >
+                保存
+              </button>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="flex-1 h-11 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded-lg transition-colors"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
