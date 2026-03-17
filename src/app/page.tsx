@@ -1,9 +1,8 @@
-/* eslint-disable @next/next/no-img-element */
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, Sparkles, Copy, Instagram, ShoppingBag, Globe, Video, Mic2, RefreshCw, Settings } from 'lucide-react'
+import { Upload, Sparkles, Copy, Instagram, ShoppingBag, Globe, Video, Mic2, RefreshCw, Settings, Languages } from 'lucide-react'
 
 interface UploadedImage {
   id: string
@@ -53,11 +52,19 @@ Please output content directly without any titles or formatting markers.`,
   tiktok: `You are a viral TikTok script writer. Based on the image, create a short, engaging video script.
 Requirements:
 1. **Hook (0-3s)**: Stop scrolling immediately.
-2. **Problem**: Show the struggle.
+2. **Problem**: Show that struggle.
 3. **Solution**: Reveal product as hero.
 4. **CTA**: Link in bio.
 Please output content directly without any titles or formatting markers.`,
 }
+
+const LANGUAGE_OPTIONS = [
+  { code: 'en', name: 'English', label: '英语' },
+  { code: 'ja', name: 'Japanese', label: '日语' },
+  { code: 'es', name: 'Spanish', label: '西班牙语' },
+  { code: 'vi', name: 'Vietnamese', label: '越南语' },
+  { code: 'th', name: 'Thai', label: '泰语' },
+]
 
 export default function HomePage() {
   const [platform, setPlatform] = useState('rednote')
@@ -69,10 +76,29 @@ export default function HomePage() {
   const [error, setError] = useState('')
   const [retryCount, setRetryCount] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
-  const [customPrompts, setCustomPrompts] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('customPrompts')
-    return saved ? JSON.parse(saved) : {}
-  })
+  const [customPrompts, setCustomPrompts] = useState<Record<string, string>>({})
+  const [selectedLanguages, setSelectedLanguages] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedPrompts = localStorage.getItem('customPrompts')
+      const savedLanguages = localStorage.getItem('selectedLanguages')
+      if (savedPrompts) {
+        try {
+          setCustomPrompts(JSON.parse(savedPrompts))
+        } catch {
+          setCustomPrompts({})
+        }
+      }
+      if (savedLanguages) {
+        try {
+          setSelectedLanguages(JSON.parse(savedLanguages))
+        } catch {
+          setSelectedLanguages({})
+        }
+      }
+    }
+  }, [])
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setError('')
@@ -125,6 +151,7 @@ export default function HomePage() {
           images: uploadedImages.map((i) => i.base64),
           additionalInfo,
           customPrompt: customPrompts[platform] || '',
+          language: selectedLanguages[platform] || 'en',
         }),
         signal: controller.signal,
       })
@@ -179,15 +206,22 @@ export default function HomePage() {
   }
 
   const handleSaveCustomPrompt = () => {
-    localStorage.setItem('customPrompts', JSON.stringify(customPrompts))
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('customPrompts', JSON.stringify(customPrompts))
+      localStorage.setItem('selectedLanguages', JSON.stringify(selectedLanguages))
+    }
     setShowSettings(false)
-    alert('提示词已保存')
+    alert('设置已保存')
   }
 
-  const handleResetPrompt = (platformId: string) => {
+  const handleResetPrompt = () => {
     setCustomPrompts(prev => ({
       ...prev,
-      [platformId]: DEFAULT_PROMPTS[platformId] || '',
+      [platform]: DEFAULT_PROMPTS[platform] || '',
+    }))
+    setSelectedLanguages(prev => ({
+      ...prev,
+      [platform]: 'en',
     }))
   }
 
@@ -197,6 +231,9 @@ export default function HomePage() {
     { id: 'amazon', name: '亚马逊', icon: Globe, color: 'text-slate-800', bg: 'bg-slate-100', border: 'border-slate-300', activeRing: 'ring-slate-800' },
     { id: 'tiktok', name: 'TikTok', icon: Video, color: 'text-cyan-700', bg: 'bg-cyan-50', border: 'border-cyan-200', activeRing: 'ring-cyan-500' },
   ]
+
+  const currentPlatform = platforms.find(p => p.id === platform)
+  const showLanguageSelector = platform === 'amazon' || platform === 'tiktok'
 
   return (
     <div className="flex flex-col lg:grid lg:grid-cols-12 min-h-screen bg-slate-50">
@@ -221,13 +258,15 @@ export default function HomePage() {
                     <p.icon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </div>
                   <span className={`text-xs sm:text-sm font-bold ${platform === p.id ? 'text-slate-900' : 'text-slate-600'}`}>{p.name}</span>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setShowSettings(true) }}
-                    className="absolute top-1 right-1 w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center transition-colors"
-                    title="自定义提示词"
-                  >
-                    <Settings className="w-3 h-3 text-slate-500" />
-                  </button>
+                  {platform === p.id && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowSettings(true) }}
+                      className="absolute top-1 right-1 w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded-full flex items-center justify-center transition-colors"
+                      title="自定义设置"
+                    >
+                      <Settings className="w-3 h-3 text-slate-500" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -325,7 +364,7 @@ export default function HomePage() {
                   {isProAudio ? '正在查阅声学参数...' : 'AI 正在疯狂码字...'}
                 </h3>
                 <p className="text-slate-500 text-xs sm:text-sm">
-                  正在匹配{isProAudio ? '专业演艺设备' : platforms.find((p) => p.id === platform)?.name}风格
+                  正在匹配{isProAudio ? '专业演艺设备' : currentPlatform?.name}风格
                 </p>
                 <p className="text-slate-400 text-xs mt-2">预计需要 10-30 秒</p>
               </div>
@@ -356,11 +395,11 @@ export default function HomePage() {
         </div>
       </div>
 
-      {showSettings && (
+      {showSettings && currentPlatform && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-slate-800">自定义提示词</h3>
+              <h3 className="text-lg font-bold text-slate-800">自定义设置 - {currentPlatform.name}</h3>
               <button
                 onClick={() => setShowSettings(false)}
                 className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
@@ -370,43 +409,50 @@ export default function HomePage() {
             </div>
 
             <div className="space-y-4">
-              {platforms.map((p) => (
-                <div key={p.id} className="space-y-2">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${p.bg}`}>
-                      <p.icon className="w-4 h-4 text-white" />
-                    </div>
-                    <span className="font-semibold text-slate-700">{p.name}</span>
-                  </div>
-                  <textarea
-                    value={customPrompts[p.id] || ''}
-                    onChange={(e) => setCustomPrompts(prev => ({ ...prev, [p.id]: e.target.value }))}
-                    placeholder="输入自定义提示词（留空使用系统默认）"
-                    className="w-full h-24 px-3 py-2 text-sm border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <button
-                    onClick={() => handleResetPrompt(p.id)}
-                    className="text-xs text-slate-500 hover:text-slate-700 underline"
-                  >
-                    恢复默认
-                  </button>
-                </div>
-              ))}
-            </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">提示词</label>
+                <textarea
+                  value={customPrompts[platform] || ''}
+                  onChange={(e) => setCustomPrompts(prev => ({ ...prev, [platform]: e.target.value }))}
+                  placeholder={`输入${currentPlatform.name}的自定义提示词（留空使用系统默认）`}
+                  className="w-full h-24 px-3 py-2 text-sm border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
 
-            <div className="flex gap-2 mt-6">
-              <button
-                onClick={handleSaveCustomPrompt}
-                className="flex-1 h-11 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
-              >
-                保存
-              </button>
-              <button
-                onClick={() => setShowSettings(false)}
-                className="flex-1 h-11 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded-lg transition-colors"
-              >
-                取消
-              </button>
+              {showLanguageSelector && (
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700 flex items-center gap-2">
+                    <Languages className="w-4 h-4" />
+                    输出语言
+                  </label>
+                  <select
+                    value={selectedLanguages[platform] || 'en'}
+                    onChange={(e) => setSelectedLanguages(prev => ({ ...prev, [platform]: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    {LANGUAGE_OPTIONS.map((lang) => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-6">
+                <button
+                  onClick={handleSaveCustomPrompt}
+                  className="flex-1 h-11 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+                >
+                  保存
+                </button>
+                <button
+                  onClick={handleResetPrompt}
+                  className="flex-1 h-11 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded-lg transition-colors"
+                >
+                  恢复默认
+                </button>
+              </div>
             </div>
           </div>
         </div>

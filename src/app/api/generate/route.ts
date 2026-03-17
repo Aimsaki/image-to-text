@@ -43,16 +43,26 @@ async function analyzeImages(images: string[], prompt: string) {
   return data.choices[0]?.message?.content || ''
 }
 
+const LANGUAGE_MAP: Record<string, string> = {
+  en: 'English',
+  ja: '日本語',
+  es: 'Español',
+  vi: 'Tiếng Việt',
+  th: 'ภาษาไทย',
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { platform, tone, images, additionalInfo, isProAudio, customPrompt } = body
+    const { platform, tone, images, additionalInfo, isProAudio, customPrompt, language } = body
 
     if (!images || images.length === 0) {
       return NextResponse.json({ error: '请上传图片' }, { status: 400 })
     }
 
     let finalPrompt = customPrompt
+    const targetLanguage = language || 'en'
+    const languageName = LANGUAGE_MAP[targetLanguage] || 'English'
 
     if (!finalPrompt) {
       const proInstruction = isProAudio
@@ -83,13 +93,12 @@ export async function POST(req: Request) {
         case 'amazon':
           platformStyle = `
         【Role】: Top-Tier Amazon SEO Copywriter.
-        【STRICT REQUIREMENT】: **OUTPUT IN ENGLISH ONLY.**
         
         【Format】:
         1. **Title**: [Brand] + [Keywords] + [Features] + [Model] (Max 200 chars).
         2. **5 Bullet Points**: [CAPS HEADER] - Benefit. Focus on pain points & specs.
         3. **Description**: 150 words usage scenario.
-        【Tone】: Professional, Trustworthy, Native American English.
+        【Tone】: Professional, Trustworthy.
       `
           break
 
@@ -108,11 +117,10 @@ export async function POST(req: Request) {
         case 'tiktok':
           platformStyle = `
         【Role】: Viral TikTok Script Writer.
-        【STRICT REQUIREMENT】: **OUTPUT IN ENGLISH ONLY.**
         
         【Structure】:
         1. **Hook (0-3s)**: Stop scrolling immediately.
-        2. **Problem**: Show the struggle.
+        2. **Problem**: Show that struggle.
         3. **Solution**: Reveal product as hero.
         4. **CTA**: Link in bio.
       `
@@ -133,9 +141,11 @@ export async function POST(req: Request) {
       finalPrompt += `\n\n【用户补充信息】\n${additionalInfo}`
     }
 
+    finalPrompt += `\n\n【重要语言要求】：请务必使用${languageName}输出全部文案内容。不要使用其他语言。`
+
     finalPrompt += '\n\n请直接输出最终文案，不要输出思考过程。'
 
-    console.log(`📝 Generating [${platform}] ProMode: ${isProAudio ? 'ON' : 'OFF'} CustomPrompt: ${customPrompt ? 'YES' : 'NO'}...`)
+    console.log(`📝 Generating [${platform}] Language: ${languageName} ProMode: ${isProAudio ? 'ON' : 'OFF'} CustomPrompt: ${customPrompt ? 'YES' : 'NO'}...`)
 
     const result = await analyzeImages(images, finalPrompt)
 
