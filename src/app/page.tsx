@@ -3,7 +3,7 @@
 
 import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, Sparkles, Copy, Instagram, ShoppingBag, Globe, Video, Mic2 } from 'lucide-react'
+import { Upload, Sparkles, Copy, Instagram, ShoppingBag, Globe, Video, Mic2, RefreshCw } from 'lucide-react'
 
 interface UploadedImage {
   id: string
@@ -20,6 +20,7 @@ export default function HomePage() {
   const [generatedContent, setGeneratedContent] = useState('')
   const [isProAudio, setIsProAudio] = useState(false)
   const [error, setError] = useState('')
+  const [retryCount, setRetryCount] = useState(0)
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setError('')
@@ -45,19 +46,22 @@ export default function HomePage() {
     accept: { 'image/*': [] },
   })
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (isRetry = false) => {
     if (uploadedImages.length === 0) {
       setError('请上传图片')
       return
     }
     
     setIsGenerating(true)
-    setGeneratedContent('')
+    if (!isRetry) {
+      setGeneratedContent('')
+      setRetryCount(0)
+    }
     setError('')
     
     try {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 60000)
+      const timeoutId = setTimeout(() => controller.abort(), 90000)
       
       const res = await fetch('/api/generate', {
         method: 'POST',
@@ -74,29 +78,51 @@ export default function HomePage() {
       
       clearTimeout(timeoutId)
       
-      const data = await res.json()
-      
       if (!res.ok) {
-        throw new Error(data.error || `服务器错误 (${res.status})`)
+        const errorText = await res.text()
+        let errorMessage = `服务器错误 (${res.status})`
+        try {
+          const errorData = JSON.parse(errorText)
+          errorMessage = errorData.error || errorMessage
+        } catch {
+          if (errorText.includes('<!DOCTYPE') || errorText.includes('<html')) {
+            errorMessage = '服务暂时不可用，请稍后重试'
+          }
+        }
+        throw new Error(errorMessage)
       }
+      
+      const data = await res.json()
       
       if (data.content) {
         setGeneratedContent(data.content)
+        setRetryCount(0)
       } else {
         throw new Error('未获取到生成内容')
       }
     } catch (e: any) {
       console.error('生成错误:', e)
+      let errorMessage = '生成失败，请重试'
+      
       if (e.name === 'AbortError') {
-        setError('请求超时，请重试')
+        errorMessage = '请求超时，请点击重试'
+      } else if (e.message?.includes('fetch failed') || e.message?.includes('Failed to fetch')) {
+        errorMessage = '网络连接失败，请检查网络后重试'
+      } else if (e.message?.includes('NetworkError')) {
+        errorMessage = '网络错误，请检查网络连接'
       } else if (e.message) {
-        setError(e.message)
-      } else {
-        setError('生成失败，请检查网络连接')
+        errorMessage = e.message
       }
+      
+      setError(errorMessage)
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  const handleRetry = () => {
+    setRetryCount(prev => prev + 1)
+    handleGenerate(true)
   }
 
   const platforms = [
@@ -189,13 +215,23 @@ export default function HomePage() {
           </div>
 
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-              ⚠️ {error}
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <span className="text-red-600 text-sm flex-1">⚠️ {error}</span>
+                <button
+                  onClick={handleRetry}
+                  disabled={isGenerating}
+                  className="flex items-center gap-1 px-3 py-1 bg-red-600 text-white text-xs rounded-lg hover:bg-red-700 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isGenerating ? 'animate-spin' : ''}`} />
+                  重试
+                </button>
+              </div>
             </div>
           )}
 
           <button
-            onClick={handleGenerate}
+            onClick={() => handleGenerate()}
             disabled={isGenerating}
             className="w-full h-11 sm:h-12 bg-indigo-600 hover:bg-indigo-700 text-white text-base sm:text-lg font-medium rounded-lg shadow-lg shadow-indigo-200/50 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -218,6 +254,7 @@ export default function HomePage() {
                 <p className="text-slate-500 text-xs sm:text-sm">
                   正在匹配{isProAudio ? '专业演艺设备' : platforms.find((p) => p.id === platform)?.name}风格
                 </p>
+                <p className="text-slate-400 text-xs mt-2">预计需要 10-30 秒</p>
               </div>
             )}
 
