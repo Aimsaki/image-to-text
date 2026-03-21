@@ -77,11 +77,19 @@ async function analyzeImages(images: string[], prompt: string, retryCount = 0): 
 }
 
 const LANGUAGE_MAP: Record<string, string> = {
+  zh: '中文',
   en: 'English',
   ja: '日本語',
   es: 'Español',
   vi: 'Tiếng Việt',
   th: 'ภาษาไทย',
+}
+
+const PLATFORM_DEFAULT_LANGUAGE: Record<string, string> = {
+  rednote: 'zh',
+  taobao: 'zh',
+  amazon: 'en',
+  tiktok: 'en',
 }
 
 export async function POST(req: Request) {
@@ -94,8 +102,8 @@ export async function POST(req: Request) {
     }
 
     let finalPrompt = customPrompt
-    const targetLanguage = language || 'en'
-    const languageName = LANGUAGE_MAP[targetLanguage] || 'English'
+    const targetLanguage = language || PLATFORM_DEFAULT_LANGUAGE[platform] || 'zh'
+    const languageName = LANGUAGE_MAP[targetLanguage] || '中文'
 
     if (!finalPrompt) {
       const proInstruction = isProAudio
