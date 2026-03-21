@@ -87,6 +87,7 @@ Please output content directly without any titles or formatting markers.`,
 }
 
 const LANGUAGE_OPTIONS = [
+  { code: 'zh', name: 'Chinese', label: '中文' },
   { code: 'en', name: 'English', label: '英语' },
   { code: 'ja', name: 'Japanese', label: '日语' },
   { code: 'es', name: 'Spanish', label: '西班牙语' },
@@ -228,7 +229,7 @@ export default function HomePage() {
             images: uploadedImages.map((i) => i.base64),
             additionalInfo,
             customPrompt: customPrompts[platform] || '',
-            language: selectedLanguages[platform] || 'en',
+            language: selectedLanguages[platform] || '',
           }),
           signal: controller.signal,
         })
@@ -315,13 +316,14 @@ export default function HomePage() {
   }
 
   const handleResetPrompt = () => {
+    const defaultLanguage = platform === 'rednote' || platform === 'taobao' ? 'zh' : 'en'
     setCustomPrompts(prev => ({
       ...prev,
       [platform]: DEFAULT_PROMPTS[platform] || '',
     }))
     setSelectedLanguages(prev => ({
       ...prev,
-      [platform]: 'en',
+      [platform]: defaultLanguage,
     }))
   }
 
@@ -333,7 +335,8 @@ export default function HomePage() {
   ]
 
   const currentPlatform = platforms.find(p => p.id === platform)
-  const showLanguageSelector = platform === 'amazon' || platform === 'tiktok'
+  const defaultLanguage = platform === 'rednote' || platform === 'taobao' ? 'zh' : 'en'
+  const currentLanguage = selectedLanguages[platform] || defaultLanguage
 
   return (
     <div className="flex flex-col lg:grid lg:grid-cols-12 min-h-screen bg-slate-50">
@@ -541,25 +544,23 @@ export default function HomePage() {
                 />
               </div>
 
-              {showLanguageSelector && (
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700 flex items-center gap-2">
-                    <Languages className="w-4 h-4" />
-                    输出语言
-                  </label>
-                  <select
-                    value={selectedLanguages[platform] || 'en'}
-                    onChange={(e) => setSelectedLanguages(prev => ({ ...prev, [platform]: e.target.value }))}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    {LANGUAGE_OPTIONS.map((lang) => (
-                      <option key={lang.code} value={lang.code}>
-                        {lang.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700 flex items-center gap-2">
+                  <Languages className="w-4 h-4" />
+                  输出语言
+                </label>
+                <select
+                  value={currentLanguage}
+                  onChange={(e) => setSelectedLanguages(prev => ({ ...prev, [platform]: e.target.value }))}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  {LANGUAGE_OPTIONS.map((lang) => (
+                    <option key={lang.code} value={lang.code}>
+                      {lang.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div className="flex gap-2 mt-6">
                 <button
