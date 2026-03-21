@@ -2,13 +2,41 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, Sparkles, Copy, Instagram, ShoppingBag, Globe, Video, Mic2, RefreshCw, Settings, Languages } from 'lucide-react'
+import { Upload, Sparkles, Copy, Instagram, ShoppingBag, Globe, Video, Mic2, RefreshCw, Settings, Languages, Wifi, WifiOff } from 'lucide-react'
 
 interface UploadedImage {
   id: string
   preview: string
   base64: string
   file: File
+}
+
+const compressImage = (file: File, maxWidth = 1024, quality = 0.8): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    const img = new Image()
+    
+    img.onload = () => {
+      let { width, height } = img
+      
+      if (width > maxWidth) {
+        height = (height * maxWidth) / width
+        width = maxWidth
+      }
+      
+      canvas.width = width
+      canvas.height = height
+      
+      ctx?.drawImage(img, 0, 0, width, height)
+      
+      const compressedBase64 = canvas.toDataURL('image/jpeg', quality).split(',')[1]
+      resolve(compressedBase64)
+    }
+    
+    img.onerror = () => reject(new Error('图片加载失败'))
+    img.src = URL.createObjectURL(file)
+  })
 }
 
 interface PlatformConfig {
@@ -78,6 +106,28 @@ export default function HomePage() {
   const [showSettings, setShowSettings] = useState(false)
   const [customPrompts, setCustomPrompts] = useState<Record<string, string>>({})
   const [selectedLanguages, setSelectedLanguages] = useState<Record<string, string>>({})
+  const [isOnline, setIsOnline] = useState(true)
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent))
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    setIsOnline(navigator.onLine)
+    
+    return () => {
+      window.removeEventListener('resize', checkMobile)
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -100,23 +150,40 @@ export default function HomePage() {
     }
   }, [])
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
     setError('')
-    Promise.all(
-      acceptedFiles.map(async (f, i) => {
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(reader.result as string)
-          reader.readAsDataURL(f)
+    setIsGenerating(true)
+    
+    try {
+      const imgs = await Promise.all(
+        acceptedFiles.map(async (f, i) => {
+          try {
+            const compressedBase64 = await compressImage(f, 1024, 0.8)
+            return {
+              id: `${Date.now()}-${i}`,
+              preview: URL.createObjectURL(f),
+              base64: compressedBase64,
+              file: f,
+            }
+          } catch (e) {
+            console.error('图片压缩失败:', e)
+            return null
+          }
         })
-        return {
-          id: `${Date.now()}-${i}`,
-          preview: URL.createObjectURL(f),
-          base64: base64.split(',')[1],
-          file: f,
-        }
-      })
-    ).then((imgs) => setUploadedImages((prev) => [...prev, ...imgs]))
+      )
+      
+      const validImgs = imgs.filter((img): img is UploadedImage => img !== null)
+      if (validImgs.length === 0) {
+        setError('图片处理失败，请重试')
+      } else {
+        setUploadedImages((prev) => [...prev, ...validImgs])
+      }
+    } catch (e) {
+      console.error('上传处理错误:', e)
+      setError('图片上传失败，请重试')
+    } finally {
+      setIsGenerating(false)
+    }
   }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -130,6 +197,11 @@ export default function HomePage() {
       return
     }
     
+    if (!isOnline) {
+      setError('网络已断开，请检查网络连接')
+      return
+    }
+    
     setIsGenerating(true)
     if (!isRetry) {
       setGeneratedContent('')
@@ -137,55 +209,74 @@ export default function HomePage() {
     }
     setError('')
     
-    try {
+    const timeoutDuration = isMobile ? 120000 : 90000
+    const maxRetries = 2
+    let attemptCount = isRetry ? retryCount : 0
+    
+    const attemptRequest = async (attempt: number): Promise<void> => {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 90000)
+      const timeoutId = setTimeout(() => controller.abort(), timeoutDuration)
       
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          platform,
-          tone: 'passion',
-          isProAudio,
-          images: uploadedImages.map((i) => i.base64),
-          additionalInfo,
-          customPrompt: customPrompts[platform] || '',
-          language: selectedLanguages[platform] || 'en',
-        }),
-        signal: controller.signal,
-      })
-      
-      clearTimeout(timeoutId)
-      
-      if (!res.ok) {
-        const errorText = await res.text()
-        let errorMessage = `服务器错误 (${res.status})`
-        try {
-          const errorData = JSON.parse(errorText)
-          errorMessage = errorData.error || errorMessage
-        } catch {
-          if (errorText.includes('<!DOCTYPE') || errorText.includes('<html')) {
-            errorMessage = '服务暂时不可用，请稍后重试'
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            platform,
+            tone: 'passion',
+            isProAudio,
+            images: uploadedImages.map((i) => i.base64),
+            additionalInfo,
+            customPrompt: customPrompts[platform] || '',
+            language: selectedLanguages[platform] || 'en',
+          }),
+          signal: controller.signal,
+        })
+        
+        clearTimeout(timeoutId)
+        
+        if (!res.ok) {
+          const errorText = await res.text()
+          let errorMessage = `服务器错误 (${res.status})`
+          try {
+            const errorData = JSON.parse(errorText)
+            errorMessage = errorData.error || errorMessage
+          } catch {
+            if (errorText.includes('<!DOCTYPE') || errorText.includes('<html')) {
+              errorMessage = '服务暂时不可用，请稍后重试'
+            }
           }
+          throw new Error(errorMessage)
         }
-        throw new Error(errorMessage)
+        
+        const data = await res.json()
+        
+        if (data.content) {
+          setGeneratedContent(data.content)
+          setRetryCount(0)
+        } else {
+          throw new Error('未获取到生成内容')
+        }
+      } catch (e: any) {
+        clearTimeout(timeoutId)
+        
+        if (attempt < maxRetries && (e.name === 'AbortError' || e.message?.includes('fetch'))) {
+          console.log(`自动重试 ${attempt + 1}/${maxRetries}...`)
+          await new Promise(resolve => setTimeout(resolve, 1000))
+          return attemptRequest(attempt + 1)
+        }
+        throw e
       }
-      
-      const data = await res.json()
-      
-      if (data.content) {
-        setGeneratedContent(data.content)
-        setRetryCount(0)
-      } else {
-        throw new Error('未获取到生成内容')
-      }
+    }
+    
+    try {
+      await attemptRequest(attemptCount)
     } catch (e: any) {
       console.error('生成错误:', e)
       let errorMessage = '生成失败，请重试'
       
       if (e.name === 'AbortError') {
-        errorMessage = '请求超时，请点击重试'
+        errorMessage = isMobile ? '网络较慢，请求超时。建议切换WiFi后重试' : '请求超时，请点击重试'
       } else if (e.message?.includes('fetch failed') || e.message?.includes('Failed to fetch')) {
         errorMessage = '网络连接失败，请检查网络后重试'
       } else if (e.message?.includes('NetworkError')) {
@@ -237,9 +328,19 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-col lg:grid lg:grid-cols-12 min-h-screen bg-slate-50">
-      <div className="w-full lg:col-span-4 bg-white border-b lg:border-r border-slate-200 p-4 sm:p-6 overflow-y-auto shrink-0">
+      {!isOnline && (
+        <div className="fixed top-0 left-0 right-0 bg-red-500 text-white text-center py-2 text-sm z-50 flex items-center justify-center gap-2">
+          <WifiOff className="w-4 h-4" />
+          网络已断开，请检查网络连接
+        </div>
+      )}
+      
+      <div className={`w-full lg:col-span-4 bg-white border-b lg:border-r border-slate-200 p-4 sm:p-6 overflow-y-auto shrink-0 ${!isOnline ? 'mt-8' : ''}`}>
         <h2 className="font-bold text-lg sm:text-xl mb-4 sm:mb-6 flex items-center gap-2 text-slate-800">
           <Sparkles className="text-indigo-600 w-5 h-5" /> AI 爆款文案
+          {isMobile && isOnline && (
+            <Wifi className="w-4 h-4 text-green-500 ml-auto" />
+          )}
         </h2>
 
         <div className="space-y-6 sm:space-y-8">
@@ -296,10 +397,11 @@ export default function HomePage() {
 
           <div>
             <label className="mb-3 block text-sm font-medium text-slate-700">产品素材</label>
-            <div {...getRootProps()} className={`border-2 border-dashed rounded-xl p-4 sm:p-6 text-center cursor-pointer transition-all ${isDragActive ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-indigo-400 hover:bg-slate-50'}`}>
-              <input {...getInputProps()} />
+            <div {...getRootProps()} className={`border-2 border-dashed rounded-xl p-4 sm:p-6 text-center cursor-pointer transition-all touch-manipulation ${isDragActive ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-indigo-400 hover:bg-slate-50 active:bg-slate-100'}`}>
+              <input {...getInputProps()} capture="environment" />
               <Upload className="w-6 h-6 sm:w-8 sm:h-8 text-slate-400 mx-auto mb-2" />
-              <p className="text-xs sm:text-sm text-slate-500">点击或拖拽上传图片</p>
+              <p className="text-xs sm:text-sm text-slate-500">{isMobile ? '点击上传图片' : '点击或拖拽上传图片'}</p>
+              {isMobile && <p className="text-[10px] text-slate-400 mt-1">支持相机拍照或相册选择</p>}
             </div>
             {uploadedImages.length > 0 && (
               <div className="grid grid-cols-4 gap-2 mt-3">
@@ -308,7 +410,7 @@ export default function HomePage() {
                     <img src={img.preview} alt="preview" className="w-full h-14 sm:h-16 object-cover rounded-lg border border-slate-100 shadow-sm" />
                     <button
                       onClick={(e) => { e.stopPropagation(); setUploadedImages((prev) => prev.filter((i) => i.id !== img.id)); setError('') }}
-                      className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity touch-manipulation"
                     >×</button>
                   </div>
                 ))}
@@ -372,12 +474,24 @@ export default function HomePage() {
 
             {!isGenerating && generatedContent ? (
               <>
-                <div className="prose prose-sm sm:prose-lg max-w-none whitespace-pre-wrap text-slate-700 font-medium leading-relaxed">
+                <div className="prose prose-sm sm:prose-lg max-w-none whitespace-pre-wrap text-slate-700 font-medium leading-relaxed pr-16 sm:pr-20">
                   {generatedContent}
                 </div>
                 <button
-                  onClick={() => { navigator.clipboard.writeText(generatedContent); alert('已复制') }}
-                  className="absolute top-4 right-4 sm:top-6 sm:right-6 px-3 py-1.5 sm:px-4 sm:py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2"
+                  onClick={() => { 
+                    navigator.clipboard.writeText(generatedContent)
+                    if (isMobile) {
+                      const btn = document.getElementById('copy-btn')
+                      if (btn) btn.textContent = '已复制!'
+                      setTimeout(() => {
+                        if (btn) btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg> 复制'
+                      }, 1500)
+                    } else {
+                      alert('已复制')
+                    }
+                  }}
+                  id="copy-btn"
+                  className="absolute top-4 right-4 sm:top-6 sm:right-6 px-3 py-1.5 sm:px-4 sm:py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-colors flex items-center gap-2 touch-manipulation"
                 >
                   <Copy className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> 复制
                 </button>
