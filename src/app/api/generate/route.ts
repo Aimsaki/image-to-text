@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 
 const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY
 
-async function analyzeImages(images: string[], prompt: string) {
+async function analyzeImages(images: string[], prompt: string, retryCount = 0): Promise<string> {
   if (!DASHSCOPE_API_KEY) {
     throw new Error('DASHSCOPE_API_KEY 未配置')
   }
@@ -20,27 +20,60 @@ async function analyzeImages(images: string[], prompt: string) {
     { type: 'text', text: prompt },
   ]
 
-  const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${DASHSCOPE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'qwen-vl-max',
-      messages: [{ role: 'user', content: contentParts }],
-      max_tokens: 2000,
-      temperature: 0.7,
-    }),
-  })
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 60000)
 
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.message || 'API调用失败')
+    const response = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${DASHSCOPE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'qwen-vl-max',
+        messages: [{ role: 'user', content: contentParts }],
+        max_tokens: 2000,
+        temperature: 0.7,
+      }),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      let errorMessage = 'API调用失败'
+      try {
+        const error = await response.json()
+        errorMessage = error.message || error.error?.message || errorMessage
+      } catch {
+        errorMessage = `API错误 (${response.status})`
+      }
+      
+      if (response.status === 429) {
+        errorMessage = '请求过于频繁，请稍后重试'
+      } else if (response.status === 503 || response.status === 502) {
+        errorMessage = '服务暂时不可用，请稍后重试'
+      }
+      
+      throw new Error(errorMessage)
+    }
+
+    const data = await response.json()
+    return data.choices[0]?.message?.content || ''
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      throw new Error('API请求超时，请重试')
+    }
+    
+    if (retryCount < 1 && (error.message?.includes('fetch') || error.message?.includes('network'))) {
+      console.log('API请求失败，自动重试...')
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      return analyzeImages(images, prompt, retryCount + 1)
+    }
+    
+    throw error
   }
-
-  const data = await response.json()
-  return data.choices[0]?.message?.content || ''
 }
 
 const LANGUAGE_MAP: Record<string, string> = {
@@ -145,13 +178,29 @@ export async function POST(req: Request) {
 
     finalPrompt += '\n\n请直接输出最终文案，不要输出思考过程。'
 
-    console.log(`📝 Generating [${platform}] Language: ${languageName} ProMode: ${isProAudio ? 'ON' : 'OFF'} CustomPrompt: ${customPrompt ? 'YES' : 'NO'}...`)
+    console.log(`📝 Generating [${platform}] Language: ${languageName} ProMode: ${isProAudio ? 'ON' : 'OFF'} CustomPrompt: ${customPrompt ? 'YES' : 'NO'} Images: ${images.length}...`)
 
     const result = await analyzeImages(images, finalPrompt)
 
+    if (!result || result.trim() === '') {
+      throw new Error('AI返回内容为空，请重试')
+    }
+
+    console.log(`✅ Generated successfully, length: ${result.length}`)
     return NextResponse.json({ content: result })
   } catch (error: any) {
     console.error('Copywriter error:', error)
-    return NextResponse.json({ error: error.message || '生成失败' }, { status: 500 })
+    
+    let errorMessage = error.message || '生成失败'
+    
+    if (errorMessage.includes('JSON') || errorMessage.includes('parse')) {
+      errorMessage = '数据解析错误，请重试'
+    } else if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+      errorMessage = '请求超时，请检查网络后重试'
+    } else if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+      errorMessage = '网络连接失败，请检查网络'
+    }
+    
+    return NextResponse.json({ error: errorMessage }, { status: 500 })
   }
 }
