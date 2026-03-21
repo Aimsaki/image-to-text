@@ -238,12 +238,21 @@ export default function HomePage() {
         if (!res.ok) {
           const errorText = await res.text()
           let errorMessage = `服务器错误 (${res.status})`
-          try {
-            const errorData = JSON.parse(errorText)
-            errorMessage = errorData.error || errorMessage
-          } catch {
-            if (errorText.includes('<!DOCTYPE') || errorText.includes('<html')) {
-              errorMessage = '服务暂时不可用，请稍后重试'
+          
+          if (res.status === 504 || res.status === 502) {
+            errorMessage = '服务器响应超时，请稍后重试（AI处理需要时间）'
+          } else if (res.status === 429) {
+            errorMessage = '请求过于频繁，请稍后再试'
+          } else if (res.status === 500) {
+            errorMessage = '服务器内部错误，请稍后重试'
+          } else {
+            try {
+              const errorData = JSON.parse(errorText)
+              errorMessage = errorData.error || errorMessage
+            } catch {
+              if (errorText.includes('<!DOCTYPE') || errorText.includes('<html')) {
+                errorMessage = '服务暂时不可用，请稍后重试'
+              }
             }
           }
           throw new Error(errorMessage)
@@ -398,10 +407,9 @@ export default function HomePage() {
           <div>
             <label className="mb-3 block text-sm font-medium text-slate-700">产品素材</label>
             <div {...getRootProps()} className={`border-2 border-dashed rounded-xl p-4 sm:p-6 text-center cursor-pointer transition-all touch-manipulation ${isDragActive ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-indigo-400 hover:bg-slate-50 active:bg-slate-100'}`}>
-              <input {...getInputProps()} capture="environment" />
+              <input {...getInputProps()} />
               <Upload className="w-6 h-6 sm:w-8 sm:h-8 text-slate-400 mx-auto mb-2" />
-              <p className="text-xs sm:text-sm text-slate-500">{isMobile ? '点击上传图片' : '点击或拖拽上传图片'}</p>
-              {isMobile && <p className="text-[10px] text-slate-400 mt-1">支持相机拍照或相册选择</p>}
+              <p className="text-xs sm:text-sm text-slate-500">{isMobile ? '点击选择图片（相册/相机）' : '点击或拖拽上传图片'}</p>
             </div>
             {uploadedImages.length > 0 && (
               <div className="grid grid-cols-4 gap-2 mt-3">
